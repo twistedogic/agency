@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +14,9 @@ import (
 )
 
 const defaultConfigPath = ".config/agency.yaml"
+
+//go:embed testdata/agency.yaml
+var defaultConfig []byte
 
 func readFiles(paths []string) (string, error) {
 	contexts := make([]string, len(paths))
@@ -68,7 +72,9 @@ func (a Agent) Do(ctx context.Context, info ...string) error {
 type Agency []Agent
 
 func (a Agency) Dispatch(ctx context.Context, name string, info ...string) error {
-	for _, agent := range a {
+	names := make([]string, len(a))
+	for i, agent := range a {
+		names[i] = agent.Name
 		if strings.ToLower(agent.Name) == strings.ToLower(name) {
 			if err := agent.Do(ctx, info...); err != nil {
 				return err
@@ -76,7 +82,7 @@ func (a Agency) Dispatch(ctx context.Context, name string, info ...string) error
 			return nil
 		}
 	}
-	return fmt.Errorf("no matching agent for %q", name)
+	return fmt.Errorf("no matching agent for %q in [%s]", name, strings.Join(names, ", "))
 }
 
 func loadConfig(path string) (Agency, error) {
@@ -92,11 +98,21 @@ func loadConfig(path string) (Agency, error) {
 }
 
 func loadDefaultConfig() (Agency, error) {
-	dir, err := os.UserHomeDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	return loadConfig(filepath.Join(dir, defaultConfigPath))
+	path := filepath.Join(home, defaultConfigPath)
+	if _, err := os.Stat(path); err != nil {
+		dir := filepath.Dir(path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(path, defaultConfig, 0644); err != nil {
+			return nil, err
+		}
+	}
+	return loadConfig(path)
 }
 
 func main() {
