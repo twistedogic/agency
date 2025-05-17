@@ -3,13 +3,18 @@ package main
 import (
 	"context"
 	_ "embed"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glow/v2/ui"
+	"github.com/charmbracelet/huh"
 	"github.com/ollama/ollama/api"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,8 +23,16 @@ const defaultConfigPath = ".config/agency.yaml"
 //go:embed testdata/agency.yaml
 var defaultConfig []byte
 
+func getTerminalWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 80 // Fallback width
+	}
+	return width - 20
+}
+
 func readFiles(paths []string) (string, error) {
-	contexts := make([]string, len(paths))
+	var contexts strings.Builder
 	for _, path := range paths {
 		files, err := filepath.Glob(path)
 		if err != nil {
@@ -30,11 +43,47 @@ func readFiles(paths []string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			contexts = append(contexts, string(b))
+			contexts.Write(b)
+			contexts.WriteString("\n")
 		}
-
 	}
-	return strings.Join(contexts, "\n"), nil
+	return contexts.String(), nil
+}
+
+func generate(ctx context.Context, model, role, instruct string, info ...string) error {
+	contexts, err := readFiles(info)
+	if err != nil {
+		return err
+	}
+	prompt := "<CONTEXT>\n" + contexts + "\n</CONTEXT>"
+	prompt += "\n\nROLE: " + role
+	prompt += "\n\nINSTRUCTION: " + instruct
+	prompt += "\n\nRESPONSE:"
+	client, err := api.ClientFromEnvironment()
+	if err != nil {
+		return err
+	}
+	var response string
+	stream := true
+	req := &api.GenerateRequest{
+		Prompt: prompt,
+		Stream: &stream,
+		Model:  model,
+	}
+	if err := client.Generate(ctx, req, func(gr api.GenerateResponse) error {
+		fmt.Print(gr.Response)
+		response += gr.Response
+		return nil
+	}); err != nil {
+		return err
+	}
+	if md, err := glamour.Render(response, "dark"); err == nil {
+		response = md
+	}
+	if _, err := ui.NewProgram(ui.Config{}, response).Run(); err != nil {
+		return err
+	}
+	return nil
 }
 
 type Agent struct {
@@ -42,6 +91,7 @@ type Agent struct {
 	Model       string `yaml:"model"`
 	Role        string `yaml:"role"`
 	Instruction string `yaml:"instruction"`
+	Interactive bool   `yaml:"-"`
 }
 
 func (a Agent) Do(ctx context.Context, info ...string) error {
@@ -49,33 +99,52 @@ func (a Agent) Do(ctx context.Context, info ...string) error {
 	if a.Model != "" {
 		model = a.Model
 	}
-	contexts, err := readFiles(info)
-	prompt := "<CONTEXT>\n" + contexts + "\n</CONTEXT>"
-	prompt += "\n\nROLE: " + a.Role
-	prompt += "\n\nINSTRUCTION: " + a.Instruction
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return err
+	if a.Interactive {
+		return a.interact(ctx, info...)
 	}
-	stream := true
-	req := &api.GenerateRequest{
-		Prompt: prompt,
-		Stream: &stream,
-		Model:  model,
-	}
-	return client.Generate(ctx, req, func(gr api.GenerateResponse) error {
-		fmt.Print(gr.Response)
-		return nil
-	})
+	return generate(ctx, model, a.Role, a.Instruction, info...)
 }
 
-type Agency []Agent
+func (a Agent) interact(ctx context.Context, info ...string) error {
+	model := a.Model
+	role := a.Role
+	instruct := a.Instruction
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Title("model").Value(&model).Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("model not provided")
+				}
+				return nil
+			}),
+			huh.NewText().Title("role").Value(&role).Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("role not provided")
+				}
+				return nil
+			}),
+			huh.NewText().Title("instruction").Value(&instruct).Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("instruction not provided")
+				}
+				return nil
+			}),
+		),
+	)
+	if err := form.WithWidth(getTerminalWidth()).Run(); err != nil {
+		return err
+	}
+	return generate(ctx, model, role, instruct, info...)
+}
 
-func (a Agency) Dispatch(ctx context.Context, name string, info ...string) error {
+type Agency []*Agent
+
+func (a Agency) Dispatch(ctx context.Context, name string, interactive bool, info ...string) error {
 	names := make([]string, len(a))
 	for i, agent := range a {
 		names[i] = agent.Name
 		if strings.ToLower(agent.Name) == strings.ToLower(name) {
+			agent.Interactive = interactive
 			if err := agent.Do(ctx, info...); err != nil {
 				return err
 			}
@@ -90,7 +159,7 @@ func loadConfig(path string) (Agency, error) {
 	if err != nil {
 		return nil, err
 	}
-	agents := []Agent{}
+	agents := []*Agent{}
 	if err := yaml.Unmarshal(b, &agents); err != nil {
 		return nil, err
 	}
@@ -116,15 +185,19 @@ func loadDefaultConfig() (Agency, error) {
 }
 
 func main() {
+	var isInteractive bool
+	flag.BoolVar(&isInteractive, "i", false, "toggle interactive mode")
+	flag.Parse()
 	agents, err := loadDefaultConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
-	args := os.Args[1:]
+	args := flag.Args()
 	if len(args) < 2 {
-		log.Fatal("agent and context are not provided.")
+		fmt.Fprintf(os.Stderr, "Usage: %s <agent-name> <context>\n", os.Args[0])
+		os.Exit(1)
 	}
-	if err := agents.Dispatch(context.Background(), args[0], args[1:]...); err != nil {
+	if err := agents.Dispatch(context.Background(), args[0], isInteractive, args[1:]...); err != nil {
 		log.Fatal(err)
 	}
 }
