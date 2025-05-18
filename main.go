@@ -28,32 +28,13 @@ func getTerminalWidth() int {
 	if err != nil {
 		return 80 // Fallback width
 	}
-	return width - 20
+	return max(width-20, 80)
 }
 
-func readFiles(paths []string) (string, error) {
-	var contexts strings.Builder
-	for _, path := range paths {
-		files, err := filepath.Glob(path)
-		if err != nil {
-			return "", err
-		}
-		for _, file := range files {
-			b, err := os.ReadFile(file)
-			if err != nil {
-				return "", err
-			}
-			contexts.Write(b)
-			contexts.WriteString("\n")
-		}
-	}
-	return contexts.String(), nil
-}
-
-func generate(ctx context.Context, model, role, instruct string, info ...string) error {
+func generate(ctx context.Context, model, role, instruct string, info ...string) (string, error) {
 	contexts, err := readFiles(info)
 	if err != nil {
-		return err
+		return "", err
 	}
 	prompt := "<CONTEXT>\n" + contexts + "\n</CONTEXT>"
 	prompt += "\n\nROLE: " + role
@@ -61,9 +42,9 @@ func generate(ctx context.Context, model, role, instruct string, info ...string)
 	prompt += "\n\nRESPONSE:"
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
-		return err
+		return "", err
 	}
-	var response string
+	var response strings.Builder
 	stream := true
 	req := &api.GenerateRequest{
 		Prompt: prompt,
@@ -72,18 +53,13 @@ func generate(ctx context.Context, model, role, instruct string, info ...string)
 	}
 	if err := client.Generate(ctx, req, func(gr api.GenerateResponse) error {
 		fmt.Print(gr.Response)
-		response += gr.Response
+		response.WriteString(gr.Response)
 		return nil
 	}); err != nil {
-		return err
+		return "", err
 	}
-	if md, err := glamour.Render(response, "dark"); err == nil {
-		response = md
-	}
-	if _, err := ui.NewProgram(ui.Config{}, response).Run(); err != nil {
-		return err
-	}
-	return nil
+	return response.String(), nil
+
 }
 
 type Agent struct {
@@ -94,18 +70,7 @@ type Agent struct {
 	Interactive bool   `yaml:"-"`
 }
 
-func (a Agent) Do(ctx context.Context, info ...string) error {
-	model := "deepseek-r1"
-	if a.Model != "" {
-		model = a.Model
-	}
-	if a.Interactive {
-		return a.interact(ctx, info...)
-	}
-	return generate(ctx, model, a.Role, a.Instruction, info...)
-}
-
-func (a Agent) interact(ctx context.Context, info ...string) error {
+func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 	model := a.Model
 	role := a.Role
 	instruct := a.Instruction
@@ -132,26 +97,56 @@ func (a Agent) interact(ctx context.Context, info ...string) error {
 		),
 	)
 	if err := form.WithWidth(getTerminalWidth()).Run(); err != nil {
-		return err
+		return "", err
 	}
 	return generate(ctx, model, role, instruct, info...)
 }
 
+func (a Agent) do(ctx context.Context, info ...string) (string, error) {
+	model := "deepseek-r1"
+	if a.Model != "" {
+		model = a.Model
+	}
+	if a.Interactive {
+		return a.interact(ctx, info...)
+	}
+	return generate(ctx, model, a.Role, a.Instruction, info...)
+}
+
+func (a Agent) Do(ctx context.Context, info ...string) error {
+	response, err := a.do(ctx, info...)
+	if err != nil {
+		return err
+	}
+	if md, err := glamour.Render(response, "dark"); err == nil {
+		response = md
+	}
+	if _, err := ui.NewProgram(ui.Config{ShowLineNumbers: true}, response).Run(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type Agency []*Agent
 
-func (a Agency) Dispatch(ctx context.Context, name string, interactive bool, info ...string) error {
+func (a Agency) get(name string) (*Agent, error) {
 	names := make([]string, len(a))
 	for i, agent := range a {
 		names[i] = agent.Name
 		if strings.ToLower(agent.Name) == strings.ToLower(name) {
-			agent.Interactive = interactive
-			if err := agent.Do(ctx, info...); err != nil {
-				return err
-			}
-			return nil
+			return agent, nil
 		}
 	}
-	return fmt.Errorf("no matching agent for %q in [%s]", name, strings.Join(names, ", "))
+	return nil, fmt.Errorf("no matching agent for %q in [%s]", name, strings.Join(names, ", "))
+}
+
+func (a Agency) Dispatch(ctx context.Context, name string, interactive bool, info ...string) error {
+	agent, err := a.get(name)
+	if err != nil {
+		return err
+	}
+	agent.Interactive = interactive
+	return agent.Do(ctx, info...)
 }
 
 func loadConfig(path string) (Agency, error) {
