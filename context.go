@@ -99,7 +99,7 @@ func readFilePattern(pattern string) (string, error) {
 	return strings.Join(content, "\n"), nil
 }
 
-func readFiles(paths []string) (string, error) {
+func readContext(paths []string) (string, error) {
 	var contexts strings.Builder
 	for _, path := range paths {
 		switch getType(path) {

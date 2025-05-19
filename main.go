@@ -31,11 +31,8 @@ func getTerminalWidth() int {
 	return max(width-20, 80)
 }
 
-func generate(ctx context.Context, model, role, instruct string, info ...string) (string, error) {
-	contexts, err := readFiles(info)
-	if err != nil {
-		return "", err
-	}
+func generate(ctx context.Context, model, role, instruct, contexts string) (string, error) {
+
 	prompt := "<CONTEXT>\n" + contexts + "\n</CONTEXT>"
 	prompt += "\n\nROLE: " + role
 	prompt += "\n\nINSTRUCTION: " + instruct
@@ -71,6 +68,10 @@ type Agent struct {
 }
 
 func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
+	contexts, err := readContext(info)
+	if err != nil {
+		return "", err
+	}
 	model := a.Model
 	role := a.Role
 	instruct := a.Instruction
@@ -79,6 +80,12 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 			huh.NewInput().Title("model").Value(&model).Validate(func(s string) error {
 				if s == "" {
 					return fmt.Errorf("model not provided")
+				}
+				return nil
+			}),
+			huh.NewText().Title("context").Value(&contexts).Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("context not provided")
 				}
 				return nil
 			}),
@@ -99,7 +106,7 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 	if err := form.WithWidth(getTerminalWidth()).Run(); err != nil {
 		return "", err
 	}
-	return generate(ctx, model, role, instruct, info...)
+	return generate(ctx, model, role, instruct, contexts)
 }
 
 func (a Agent) do(ctx context.Context, info ...string) (string, error) {
@@ -110,7 +117,11 @@ func (a Agent) do(ctx context.Context, info ...string) (string, error) {
 	if a.Interactive {
 		return a.interact(ctx, info...)
 	}
-	return generate(ctx, model, a.Role, a.Instruction, info...)
+	contexts, err := readContext(info)
+	if err != nil {
+		return "", err
+	}
+	return generate(ctx, model, a.Role, a.Instruction, contexts)
 }
 
 func (a Agent) Do(ctx context.Context, info ...string) error {
@@ -188,7 +199,7 @@ func main() {
 		log.Fatal(err)
 	}
 	args := flag.Args()
-	if len(args) < 2 {
+	if !isInteractive && len(args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <agent-name> <context>\n", os.Args[0])
 		os.Exit(1)
 	}
