@@ -18,7 +18,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaultConfigPath = ".config/agency.yaml"
+const (
+	defaultConfigPath = ".config/agency.yaml"
+	defaultModel      = "deepseek-r1"
+)
 
 //go:embed testdata/agency.yaml
 var defaultConfig []byte
@@ -32,7 +35,6 @@ func getTerminalWidth() int {
 }
 
 func generate(ctx context.Context, model, role, instruct, contexts string) (string, error) {
-
 	prompt := "<CONTEXT>\n" + contexts + "\n</CONTEXT>"
 	prompt += "\n\nROLE: " + role
 	prompt += "\n\nINSTRUCTION: " + instruct
@@ -49,7 +51,7 @@ func generate(ctx context.Context, model, role, instruct, contexts string) (stri
 		Model:  model,
 	}
 	if err := client.Generate(ctx, req, func(gr api.GenerateResponse) error {
-		fmt.Print(gr.Response)
+		os.Stdout.WriteString(gr.Response)
 		response.WriteString(gr.Response)
 		return nil
 	}); err != nil {
@@ -67,12 +69,19 @@ type Agent struct {
 	Interactive bool   `yaml:"-"`
 }
 
+func (a Agent) modelOrDefault() string {
+	if a.Model != "" {
+		return a.Model
+	}
+	return defaultModel
+}
+
 func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 	contexts, err := readContext(info)
 	if err != nil {
 		return "", err
 	}
-	model := a.Model
+	model := a.modelOrDefault()
 	role := a.Role
 	instruct := a.Instruction
 	form := huh.NewForm(
@@ -110,10 +119,6 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 }
 
 func (a Agent) do(ctx context.Context, info ...string) (string, error) {
-	model := "deepseek-r1"
-	if a.Model != "" {
-		model = a.Model
-	}
 	if a.Interactive {
 		return a.interact(ctx, info...)
 	}
@@ -121,7 +126,7 @@ func (a Agent) do(ctx context.Context, info ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return generate(ctx, model, a.Role, a.Instruction, contexts)
+	return generate(ctx, a.modelOrDefault(), a.Role, a.Instruction, contexts)
 }
 
 func (a Agent) Do(ctx context.Context, info ...string) error {
@@ -158,6 +163,23 @@ func (a Agency) Dispatch(ctx context.Context, name string, interactive bool, inf
 	}
 	agent.Interactive = interactive
 	return agent.Do(ctx, info...)
+}
+
+func (a Agency) List(ctx context.Context) error {
+	names := make([]string, len(a))
+	for i, agent := range a {
+		names[i] = agent.Name
+	}
+	var selection string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().Title("list of agents").Options(huh.NewOptions(names...)...).Value(&selection),
+		),
+	)
+	if err := form.WithWidth(getTerminalWidth()).Run(); err != nil {
+		return err
+	}
+	return a.Dispatch(ctx, selection, true)
 }
 
 func loadConfig(path string) (Agency, error) {
@@ -199,11 +221,17 @@ func main() {
 		log.Fatal(err)
 	}
 	args := flag.Args()
-	if !isInteractive && len(args) < 2 {
+	switch {
+	case len(args) == 1 && args[0] == "list":
+		if err := agents.List(context.Background()); err != nil {
+			log.Fatal(err)
+		}
+	case !isInteractive && len(args) < 2:
 		fmt.Fprintf(os.Stderr, "Usage: %s <agent-name> <context>\n", os.Args[0])
 		os.Exit(1)
-	}
-	if err := agents.Dispatch(context.Background(), args[0], isInteractive, args[1:]...); err != nil {
-		log.Fatal(err)
+	default:
+		if err := agents.Dispatch(context.Background(), args[0], isInteractive, args[1:]...); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
