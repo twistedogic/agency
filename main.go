@@ -35,31 +35,29 @@ func getTerminalWidth() int {
 	return max(width-20, 80)
 }
 
-func generate(ctx context.Context, model, role, instruct, contexts string) (string, error) {
-	prompt := "<CONTEXT>\n" + contexts + "\n</CONTEXT>"
-	prompt += "\n\nROLE: " + role
-	prompt += "\n\nINSTRUCTION: " + instruct
-	prompt += "\n\nRESPONSE:"
+func chat(ctx context.Context, model, role, instruct, contexts string) (string, error) {
 	client, err := api.ClientFromEnvironment()
 	if err != nil {
 		return "", err
 	}
 	var response strings.Builder
 	stream := true
-	req := &api.GenerateRequest{
-		Prompt: prompt,
+	if err := client.Chat(ctx, &api.ChatRequest{
+		Model: model,
+		Messages: []api.Message{
+			{Role: "System", Content: role},
+			{Role: "User", Content: contexts},
+			{Role: "User", Content: instruct},
+		},
 		Stream: &stream,
-		Model:  model,
-	}
-	if err := client.Generate(ctx, req, func(gr api.GenerateResponse) error {
-		os.Stdout.WriteString(gr.Response)
-		response.WriteString(gr.Response)
+	}, func(cr api.ChatResponse) error {
+		os.Stdout.WriteString(cr.Message.Content)
+		response.WriteString(cr.Message.Content)
 		return nil
 	}); err != nil {
 		return "", err
 	}
 	return response.String(), nil
-
 }
 
 type Agent struct {
@@ -123,7 +121,7 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 	if err := form.WithWidth(getTerminalWidth()).Run(); err != nil {
 		return "", err
 	}
-	return generate(ctx, model, role, instruct, contexts)
+	return chat(ctx, model, role, instruct, contexts)
 }
 
 func (a Agent) do(ctx context.Context, info ...string) (string, error) {
@@ -134,7 +132,7 @@ func (a Agent) do(ctx context.Context, info ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return generate(ctx, a.modelOrDefault(), a.Role, a.Instruction, contexts)
+	return chat(ctx, a.modelOrDefault(), a.Role, a.Instruction, contexts)
 }
 
 func (a Agent) Do(ctx context.Context, info ...string) error {
