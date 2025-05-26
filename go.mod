@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/glow/v2 v2.1.0
 	github.com/charmbracelet/huh v0.7.0
+	github.com/google/subcommands v1.2.0
 	github.com/ollama/ollama v0.7.0
 	github.com/playwright-community/playwright-go v0.5200.0
 	github.com/stretchr/testify v1.9.0

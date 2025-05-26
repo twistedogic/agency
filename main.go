@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glow/v2/ui"
 	"github.com/charmbracelet/huh"
+	"github.com/google/subcommands"
 	"github.com/ollama/ollama/api"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
@@ -62,11 +63,18 @@ func generate(ctx context.Context, model, role, instruct, contexts string) (stri
 }
 
 type Agent struct {
-	Name        string `yaml:"name"`
+	AgentName   string `yaml:"name"`
 	Model       string `yaml:"model"`
 	Role        string `yaml:"role"`
 	Instruction string `yaml:"instruction"`
 	Interactive bool   `yaml:"-"`
+}
+
+func (a *Agent) Name() string     { return strings.ToLower(a.AgentName) }
+func (a *Agent) Synopsis() string { return a.Role }
+func (a *Agent) Usage() string    { return "" }
+func (a *Agent) SetFlags(f *flag.FlagSet) {
+	f.BoolVar(&a.Interactive, "i", false, "interactive mode")
 }
 
 func (a Agent) modelOrDefault() string {
@@ -143,46 +151,14 @@ func (a Agent) Do(ctx context.Context, info ...string) error {
 	return nil
 }
 
-type Agency []*Agent
-
-func (a Agency) get(name string) (*Agent, error) {
-	names := make([]string, len(a))
-	for i, agent := range a {
-		names[i] = agent.Name
-		if strings.ToLower(agent.Name) == strings.ToLower(name) {
-			return agent, nil
-		}
+func (a *Agent) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+	if err := a.Do(ctx, f.Args()...); err != nil {
+		return subcommands.ExitFailure
 	}
-	return nil, fmt.Errorf("no matching agent for %q in [%s]", name, strings.Join(names, ", "))
+	return subcommands.ExitSuccess
 }
 
-func (a Agency) Dispatch(ctx context.Context, name string, interactive bool, info ...string) error {
-	agent, err := a.get(name)
-	if err != nil {
-		return err
-	}
-	agent.Interactive = interactive
-	return agent.Do(ctx, info...)
-}
-
-func (a Agency) List(ctx context.Context) error {
-	names := make([]string, len(a))
-	for i, agent := range a {
-		names[i] = agent.Name
-	}
-	var selection string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().Title("list of agents").Options(huh.NewOptions(names...)...).Value(&selection),
-		),
-	)
-	if err := form.WithWidth(getTerminalWidth()).Run(); err != nil {
-		return err
-	}
-	return a.Dispatch(ctx, selection, true)
-}
-
-func loadConfig(path string) (Agency, error) {
+func loadConfig(path string) ([]*Agent, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -194,7 +170,7 @@ func loadConfig(path string) (Agency, error) {
 	return agents, nil
 }
 
-func loadDefaultConfig() (Agency, error) {
+func loadDefaultConfig() ([]*Agent, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -213,25 +189,14 @@ func loadDefaultConfig() (Agency, error) {
 }
 
 func main() {
-	var isInteractive bool
-	flag.BoolVar(&isInteractive, "i", false, "toggle interactive mode")
-	flag.Parse()
+	subcommands.Register(subcommands.HelpCommand(), "")
 	agents, err := loadDefaultConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
-	args := flag.Args()
-	switch {
-	case len(args) == 1 && args[0] == "list":
-		if err := agents.List(context.Background()); err != nil {
-			log.Fatal(err)
-		}
-	case !isInteractive && len(args) < 2:
-		fmt.Fprintf(os.Stderr, "Usage: %s <agent-name> <context>\n", os.Args[0])
-		os.Exit(1)
-	default:
-		if err := agents.Dispatch(context.Background(), args[0], isInteractive, args[1:]...); err != nil {
-			log.Fatal(err)
-		}
+	for _, agent := range agents {
+		subcommands.Register(agent, "")
 	}
+	flag.Parse()
+	os.Exit(int(subcommands.Execute(context.Background())))
 }

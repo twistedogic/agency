@@ -7,12 +7,11 @@ import (
 )
 
 func Test_Agency(t *testing.T) {
-	agency, err := loadConfig("testdata/agency.yaml")
+	agents, err := loadConfig("testdata/agency.yaml")
 	require.NoError(t, err)
-	_, err = agency.get("non-exist")
-	require.Error(t, err)
-	agent, err := agency.get("planner")
-	require.NoError(t, err)
+	require.Len(t, agents, 1)
+	agent := agents[0]
+	require.Equal(t, agent.AgentName, "planner")
 	out, err := agent.do(t.Context(), "testdata/example.md")
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
