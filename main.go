@@ -125,7 +125,7 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 }
 
 func (a Agent) do(ctx context.Context, info ...string) (string, error) {
-	if a.Interactive {
+	if a.Interactive || len(info) == 0 {
 		return a.interact(ctx, info...)
 	}
 	contexts, err := readContext(info)
