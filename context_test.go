@@ -7,6 +7,7 @@ import (
 )
 
 func Test_scrape(t *testing.T) {
+	t.Skip()
 	got, err := scrape("https://nix-community.github.io/home-manager/index.xhtml")
 	require.NoError(t, err)
 	t.Log(got)

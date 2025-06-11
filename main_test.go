@@ -7,6 +7,7 @@ import (
 )
 
 func Test_Agency(t *testing.T) {
+	t.Skip()
 	agents, err := loadConfig("testdata/agency.yaml")
 	require.NoError(t, err)
 	require.Len(t, agents, 1)

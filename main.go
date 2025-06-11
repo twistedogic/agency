@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glow/v2/ui"
 	"github.com/charmbracelet/huh"
 	"github.com/google/subcommands"
@@ -21,7 +20,7 @@ import (
 
 const (
 	defaultConfigPath = ".config/agency.yaml"
-	defaultModel      = "deepseek-r1"
+	defaultModel      = "deepseek-r1:latest"
 )
 
 //go:embed testdata/agency.yaml
@@ -82,6 +81,7 @@ type Agent struct {
 	Role        string `yaml:"role"`
 	Instruction string `yaml:"instruction"`
 	Interactive bool   `yaml:"-"`
+	Extract     string `yaml:"extract"`
 }
 
 func (a *Agent) Name() string     { return strings.ToLower(a.AgentName) }
@@ -98,7 +98,14 @@ func (a Agent) modelOrDefault() string {
 	return defaultModel
 }
 
-func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
+func (a Agent) extractOrDefault() string {
+	if a.Extract != "" {
+		return a.Extract
+	}
+	return "default"
+}
+
+func (a *Agent) interact(ctx context.Context, info ...string) (string, error) {
 	contexts, err := readContext(info)
 	if err != nil {
 		return "", err
@@ -108,11 +115,13 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 		return "", err
 	}
 	model := a.modelOrDefault()
+	extract := a.extractOrDefault()
 	role := a.Role
 	instruct := a.Instruction
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("model").Options(huh.NewOptions(models...)...).Value(&model),
+			huh.NewSelect[string]().Title("extract").Options(huh.NewOptions(listExtract()...)...).Value(&extract),
 			huh.NewText().Title("context").Value(&contexts).Editor("vim").Validate(func(s string) error {
 				if s == "" {
 					return fmt.Errorf("context not provided")
@@ -136,10 +145,11 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 	if err := form.WithWidth(getTerminalWidth()).Run(); err != nil {
 		return "", err
 	}
+	a.Extract = extract
 	return chat(ctx, model, role, instruct, contexts)
 }
 
-func (a Agent) do(ctx context.Context, info ...string) (string, error) {
+func (a *Agent) do(ctx context.Context, info ...string) (string, error) {
 	if a.Interactive || len(info) == 0 {
 		return a.interact(ctx, info...)
 	}
@@ -150,15 +160,13 @@ func (a Agent) do(ctx context.Context, info ...string) (string, error) {
 	return chat(ctx, a.modelOrDefault(), a.Role, a.Instruction, contexts)
 }
 
-func (a Agent) Do(ctx context.Context, info ...string) error {
+func (a *Agent) Do(ctx context.Context, info ...string) error {
 	response, err := a.do(ctx, info...)
 	if err != nil {
 		return err
 	}
-	if md, err := glamour.Render(response, "dark"); err == nil {
-		response = md
-	}
-	if _, err := ui.NewProgram(ui.Config{ShowLineNumbers: true}, response).Run(); err != nil {
+	result := extractResponse(a.extractOrDefault())(response)
+	if _, err := ui.NewProgram(ui.Config{ShowLineNumbers: true}, result).Run(); err != nil {
 		return err
 	}
 	return nil

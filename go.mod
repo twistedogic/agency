@@ -13,6 +13,7 @@ require (
 	github.com/ollama/ollama v0.7.0
 	github.com/playwright-community/playwright-go v0.5200.0
 	github.com/stretchr/testify v1.9.0
+	github.com/yuin/goldmark v1.7.11
 	golang.org/x/term v0.31.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -62,7 +63,6 @@ require (
 	github.com/sabhiram/go-gitignore v0.0.0-20180611051255-d3107576ba94 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	github.com/yuin/goldmark v1.7.11 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/exp v0.0.0-20250218142911-aa4b98e5adaa // indirect
 	golang.org/x/net v0.39.0 // indirect
