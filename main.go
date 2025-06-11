@@ -27,6 +27,22 @@ const (
 //go:embed testdata/agency.yaml
 var defaultConfig []byte
 
+func listModels(ctx context.Context) ([]string, error) {
+	client, err := api.ClientFromEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]string, len(res.Models))
+	for i, m := range res.Models {
+		models[i] = m.Model
+	}
+	return models, nil
+}
+
 func getTerminalWidth() int {
 	width, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
@@ -87,30 +103,29 @@ func (a Agent) interact(ctx context.Context, info ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	models, err := listModels(ctx)
+	if err != nil {
+		return "", err
+	}
 	model := a.modelOrDefault()
 	role := a.Role
 	instruct := a.Instruction
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewInput().Title("model").Value(&model).Validate(func(s string) error {
-				if s == "" {
-					return fmt.Errorf("model not provided")
-				}
-				return nil
-			}),
-			huh.NewText().Title("context").Value(&contexts).Validate(func(s string) error {
+			huh.NewSelect[string]().Title("model").Options(huh.NewOptions(models...)...).Value(&model),
+			huh.NewText().Title("context").Value(&contexts).Editor("vim").Validate(func(s string) error {
 				if s == "" {
 					return fmt.Errorf("context not provided")
 				}
 				return nil
 			}),
-			huh.NewText().Title("role").Value(&role).Validate(func(s string) error {
+			huh.NewText().Title("role").Value(&role).Editor("vim").Validate(func(s string) error {
 				if s == "" {
 					return fmt.Errorf("role not provided")
 				}
 				return nil
 			}),
-			huh.NewText().Title("instruction").Value(&instruct).Validate(func(s string) error {
+			huh.NewText().Title("instruction").Value(&instruct).Editor("vim").Validate(func(s string) error {
 				if s == "" {
 					return fmt.Errorf("instruction not provided")
 				}
