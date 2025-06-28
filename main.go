@@ -122,18 +122,22 @@ func (a *Agent) interact(ctx context.Context, info ...string) (string, error) {
 		huh.NewGroup(
 			huh.NewSelect[string]().Title("model").Options(huh.NewOptions(models...)...).Value(&model),
 			huh.NewSelect[string]().Title("extract").Options(huh.NewOptions(listExtract()...)...).Value(&extract),
+			huh.NewInput().Title("role").Value(&role).Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("role not provided")
+				}
+				return nil
+			}),
+		),
+		huh.NewGroup(
 			huh.NewText().Title("context").Value(&contexts).Editor("vim").Validate(func(s string) error {
 				if s == "" {
 					return fmt.Errorf("context not provided")
 				}
 				return nil
 			}),
-			huh.NewText().Title("role").Value(&role).Editor("vim").Validate(func(s string) error {
-				if s == "" {
-					return fmt.Errorf("role not provided")
-				}
-				return nil
-			}),
+		),
+		huh.NewGroup(
 			huh.NewText().Title("instruction").Value(&instruct).Editor("vim").Validate(func(s string) error {
 				if s == "" {
 					return fmt.Errorf("instruction not provided")
