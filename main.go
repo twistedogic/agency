@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	defaultConfigPath = ".config/agency.yaml"
+	defaultConfigDir  = ".config/agency"
+	defaultConfigName = "agency.yaml"
 	defaultModel      = "deepseek-r1:latest"
 )
 
@@ -200,7 +201,7 @@ func loadDefaultConfig() ([]*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(home, defaultConfigPath)
+	path := filepath.Join(home, defaultConfigDir, defaultConfigName)
 	if _, err := os.Stat(path); err != nil {
 		dir := filepath.Dir(path)
 		if err := os.MkdirAll(dir, 0755); err != nil {
